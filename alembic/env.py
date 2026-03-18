@@ -33,6 +33,7 @@ if config.config_file_name is not None:
 from app.db.base import Base
 from app.auth import models
 from app.tickets import models
+from app.ai import models
 
 target_metadata=Base.metadata
 

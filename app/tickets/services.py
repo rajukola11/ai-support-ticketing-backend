@@ -1,9 +1,12 @@
+import logging
 from sqlalchemy.orm import Session
 from typing import Optional
 from uuid import UUID
 
 from app.tickets.models import Ticket, TicketStatus
 from app.tickets.schemas import TicketCreate, TicketUpdate
+
+logger = logging.getLogger(__name__)
 
 
 # -----------------------------
@@ -19,6 +22,18 @@ def create_ticket(db: Session, ticket_data: TicketCreate, user_id: UUID) -> Tick
     )
     db.add(ticket)
     db.commit()
+    db.refresh(ticket)
+
+    # Auto-classify with AI (non-blocking — failure won't affect ticket creation)
+    try:
+        from app.ai.services import run_classification
+        from app.core.config import get_settings
+        settings = get_settings()
+        if settings.OPENAI_API_KEY:
+            run_classification(db, ticket, apply=True)
+    except Exception as e:
+        logger.warning(f"Auto AI classification failed for ticket {ticket.id}: {e}")
+
     db.refresh(ticket)
     return ticket
 
