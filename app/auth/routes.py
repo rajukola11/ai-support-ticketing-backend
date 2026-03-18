@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -9,11 +10,13 @@ settings = get_settings()
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
 
 # -----------------------------
 # Register User
 # -----------------------------
-@router.post("/register", response_model=schemas.UserResponse)
+@router.post("/register", response_model=schemas.UserResponse, status_code=status.HTTP_201_CREATED)
 def register_user(
     user_data: schemas.UserCreate,
     db: Session = Depends(get_db)
@@ -27,7 +30,6 @@ def register_user(
         )
 
     new_user = services.create_user(db, user_data)
-
     return new_user
 
 
@@ -39,11 +41,7 @@ def login_user(
     login_data: schemas.UserLogin,
     db: Session = Depends(get_db)
 ):
-    user = services.authenticate_user(
-        db,
-        login_data.email,
-        login_data.password
-    )
+    user = services.authenticate_user(db, login_data.email, login_data.password)
 
     if not user:
         raise HTTPException(
@@ -51,21 +49,80 @@ def login_user(
             detail="Invalid email or password"
         )
 
-    access_token = security.create_access_token(
-        subject=str(user.id)
+    access_token = security.create_access_token(subject=str(user.id))
+    refresh_token_str, expires_at = security.create_refresh_token()
+
+    services.store_refresh_token(
+        db,
+        user_id=user.id,
+        token=refresh_token_str,
+        expires_at=expires_at,
     )
 
-    return schemas.Token(access_token=access_token)
+    return schemas.Token(
+        access_token=access_token,
+        refresh_token=refresh_token_str,
+    )
+
+
+# -----------------------------
+# Refresh Access Token
+# -----------------------------
+@router.post("/refresh", response_model=schemas.Token)
+def refresh_access_token(
+    body: schemas.RefreshRequest,
+    db: Session = Depends(get_db)
+):
+    record = services.get_valid_refresh_token(db, body.refresh_token)
+
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token"
+        )
+
+    user = services.get_user_by_id(db, record.user_id)
+
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found or inactive"
+        )
+
+    # Rotate: revoke old token, issue new pair
+    services.revoke_refresh_token(db, body.refresh_token)
+
+    new_access_token = security.create_access_token(subject=str(user.id))
+    new_refresh_token_str, new_expires_at = security.create_refresh_token()
+
+    services.store_refresh_token(
+        db,
+        user_id=user.id,
+        token=new_refresh_token_str,
+        expires_at=new_expires_at,
+    )
+
+    return schemas.Token(
+        access_token=new_access_token,
+        refresh_token=new_refresh_token_str,
+    )
+
+
+# -----------------------------
+# Logout
+# -----------------------------
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout_user(
+    body: schemas.LogoutRequest,
+    db: Session = Depends(get_db)
+):
+    services.revoke_refresh_token(db, body.refresh_token)
+    # Always return 204 — don't reveal if token existed
 
 
 # -----------------------------
 # Get Current User
 # -----------------------------
-from fastapi.security import OAuth2PasswordBearer
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
-
-
 @router.get("/me", response_model=schemas.UserResponse)
 def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -80,7 +137,6 @@ def get_current_user(
         )
 
     user_id = payload.get("sub")
-
     user = services.get_user_by_id(db, user_id)
 
     if not user:
