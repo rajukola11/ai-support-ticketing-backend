@@ -5,6 +5,7 @@ from typing import Optional
 
 from app.ai.models import AIResult, AIResultStatus
 from app.ai.classifier import classify_ticket
+from app.ai.draft import generate_draft_response
 from app.tickets.models import Ticket, TicketCategory, TicketPriority
 from app.core.config import get_settings
 
@@ -16,10 +17,6 @@ logger = logging.getLogger(__name__)
 # Run classification & store result
 # -----------------------------
 def run_classification(db: Session, ticket: Ticket, apply: bool = True) -> AIResult:
-    """
-    Classifies a ticket using OpenAI, stores the result in ai_results,
-    and optionally applies the suggestions back to the ticket.
-    """
     ai_result = AIResult(
         ticket_id=ticket.id,
         model_used=settings.OPENAI_MODEL,
@@ -34,7 +31,6 @@ def run_classification(db: Session, ticket: Ticket, apply: bool = True) -> AIRes
         ai_result.confidence = result["confidence"]
         ai_result.status = AIResultStatus.SUCCESS
 
-        # Apply suggestions to ticket if requested
         if apply:
             _apply_to_ticket(db, ticket, result)
             ai_result.applied = True
@@ -47,12 +43,10 @@ def run_classification(db: Session, ticket: Ticket, apply: bool = True) -> AIRes
     db.add(ai_result)
     db.commit()
     db.refresh(ai_result)
-
     return ai_result
 
 
 def _apply_to_ticket(db: Session, ticket: Ticket, result: dict) -> None:
-    """Map AI string results back to ticket enums and update."""
     category_map = {
         "general": TicketCategory.GENERAL,
         "billing": TicketCategory.BILLING,
@@ -72,6 +66,56 @@ def _apply_to_ticket(db: Session, ticket: Ticket, result: dict) -> None:
         ticket.priority = priority_map[result["priority"]]
 
     db.commit()
+
+
+# -----------------------------
+# Generate draft response
+# -----------------------------
+def run_draft_generation(db: Session, ticket: Ticket) -> AIResult:
+    """
+    Generates a draft reply for the ticket using comment history as context.
+    Stores result in ai_results table.
+    """
+    ai_result = AIResult(
+        ticket_id=ticket.id,
+        model_used=settings.OPENAI_MODEL,
+    )
+
+    try:
+        # Fetch public comments for context
+        from app.comments.models import Comment
+        comments = (
+            db.query(Comment)
+            .filter(Comment.ticket_id == ticket.id, Comment.is_internal == False)
+            .order_by(Comment.created_at.asc())
+            .all()
+        )
+
+        comments_data = [
+            {"content": c.content, "is_internal": c.is_internal}
+            for c in comments
+        ]
+
+        draft = generate_draft_response(
+            title=ticket.title,
+            description=ticket.description,
+            category=ticket.category.value,
+            priority=ticket.priority.value,
+            comments=comments_data,
+        )
+
+        ai_result.draft_response = draft
+        ai_result.status = AIResultStatus.SUCCESS
+
+    except Exception as e:
+        logger.error(f"Draft generation failed for ticket {ticket.id}: {e}")
+        ai_result.status = AIResultStatus.FAILED
+        ai_result.error_message = str(e)
+
+    db.add(ai_result)
+    db.commit()
+    db.refresh(ai_result)
+    return ai_result
 
 
 # -----------------------------

@@ -30,7 +30,6 @@ def classify_ticket(
     if not ticket:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
 
-    # Only owner, support agents, or admins can trigger classification
     if not is_support_or_admin(current_user) and ticket.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
@@ -50,7 +49,44 @@ def classify_ticket(
 
 
 # -----------------------------
-# Get latest AI result for a ticket
+# Generate draft response
+# — agents/admins only
+# -----------------------------
+@router.post("/draft/{ticket_id}", response_model=schemas.AIDraftResponse)
+def generate_draft(
+    ticket_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not is_support_or_admin(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only support agents and admins can generate draft responses"
+        )
+
+    ticket = get_ticket_by_id(db, ticket_id)
+
+    if not ticket:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ticket not found")
+
+    ai_result = services.run_draft_generation(db, ticket)
+
+    if ai_result.status.value == "failed":
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Draft generation failed: {ai_result.error_message}"
+        )
+
+    return schemas.AIDraftResponse(
+        message="Draft response generated successfully",
+        ticket_id=ticket_id,
+        draft_response=ai_result.draft_response,
+        model_used=ai_result.model_used,
+    )
+
+
+# -----------------------------
+# Get latest AI result for ticket
 # -----------------------------
 @router.get("/results/{ticket_id}", response_model=schemas.AIResultResponse)
 def get_ai_result(
@@ -75,7 +111,7 @@ def get_ai_result(
 
 
 # -----------------------------
-# Get all AI results for a ticket
+# Get all AI results for ticket
 # -----------------------------
 @router.get("/results/{ticket_id}/history", response_model=list[schemas.AIResultResponse])
 def get_ai_result_history(

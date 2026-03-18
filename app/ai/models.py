@@ -26,6 +26,9 @@ class AIResult(Base):
     summary = Column(Text, nullable=True)
     confidence = Column(Float, nullable=True)
 
+    # AI generated draft response for support agents
+    draft_response = Column(Text, nullable=True)
+
     # Meta
     status = Column(Enum(AIResultStatus), nullable=False, default=AIResultStatus.SUCCESS)
     error_message = Column(Text, nullable=True)
