@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth.routes import router as auth_router
 from app.tickets.routes import router as tickets_router
 from app.ai.routes import router as ai_router
+from app.comments.routes import router as comments_router
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -55,6 +56,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(tickets_router)
 app.include_router(ai_router)
+app.include_router(comments_router)
 
 
 # -----------------------------

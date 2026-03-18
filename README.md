@@ -192,19 +192,6 @@ Admins can be assigned manually through the database for development.
 * JWT is used for stateless authentication
 * API follows a service-layer architecture
 
----
-
-# 🚧 Upcoming Features
-
-* Support ticket management system
-* AI ticket classification
-* AI-generated response drafts
-* Admin dashboard APIs
-* Audit logging system
-* Advanced RBAC
-* Test suite with Pytest
-
----
 
 # 📄 License
 

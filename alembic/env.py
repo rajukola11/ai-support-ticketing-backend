@@ -34,6 +34,7 @@ from app.db.base import Base
 from app.auth import models
 from app.tickets import models
 from app.ai import models
+from app.comments import models
 
 target_metadata=Base.metadata
 
