@@ -1,16 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.auth import schemas, services, security
-from app.core.config import get_settings
-
-settings = get_settings()
+from app.auth.models import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 # -----------------------------
@@ -29,8 +24,7 @@ def register_user(
             detail="Email already registered"
         )
 
-    new_user = services.create_user(db, user_data)
-    return new_user
+    return services.create_user(db, user_data)
 
 
 # -----------------------------
@@ -89,7 +83,7 @@ def refresh_access_token(
             detail="User not found or inactive"
         )
 
-    # Rotate: revoke old token, issue new pair
+    # Rotate: revoke old, issue new pair
     services.revoke_refresh_token(db, body.refresh_token)
 
     new_access_token = security.create_access_token(subject=str(user.id))
@@ -117,32 +111,14 @@ def logout_user(
     db: Session = Depends(get_db)
 ):
     services.revoke_refresh_token(db, body.refresh_token)
-    # Always return 204 — don't reveal if token existed
 
 
 # -----------------------------
 # Get Current User
+# — now uses reusable dependency from security.py
 # -----------------------------
 @router.get("/me", response_model=schemas.UserResponse)
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
+def get_me(
+    current_user: User = Depends(security.get_current_user),
 ):
-    payload = security.decode_token(token)
-
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token"
-        )
-
-    user_id = payload.get("sub")
-    user = services.get_user_by_id(db, user_id)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-
-    return user
+    return current_user
