@@ -80,7 +80,7 @@ def get_tickets_by_user(
 # Update Ticket
 # -----------------------------
 def update_ticket(db: Session, ticket: Ticket, update_data: TicketUpdate) -> Ticket:
-    update_fields = update_data.model_dump(exclude_unset=True)
+    update_fields = update_data.model_dump(exclude_unset=True, exclude_none=True)
     for field, value in update_fields.items():
         setattr(ticket, field, value)
     db.commit()
@@ -102,5 +102,9 @@ def close_ticket(db: Session, ticket: Ticket) -> Ticket:
 # Delete Ticket
 # -----------------------------
 def delete_ticket(db: Session, ticket: Ticket) -> None:
+    from app.ai.models import AIResult
+    from app.comments.models import Comment
+    db.query(AIResult).filter(AIResult.ticket_id == ticket.id).delete()
+    db.query(Comment).filter(Comment.ticket_id == ticket.id).delete()
     db.delete(ticket)
     db.commit()
